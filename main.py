@@ -13,11 +13,11 @@ import librosa
 from io import BytesIO
 import joblib
 
-
+ 
 load_dotenv()
 
 app = Flask(__name__)
-UPLOAD_FOLDER = './uploads'
+UPLOAD_FOLDER = './upload'
 ALLOWED_EXTENSIONS = {'mp3', 'wav'}
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
@@ -66,25 +66,24 @@ def predict_audio_tflite(byte_data):
     return predicted_label
 
 
-def generate_transcript(filepath):
+def generate_transcript(audio_byte):
     url = os.getenv("DEEPGRAM_API_URL")
     DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 
     # file = open(filepath, "rb")
-    payload = filepath
+    payload = audio_byte
     headers = {
         "Content-Type": "audio/*",
         "Accept": "application/json",
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
     }
-
     response = requests.post(url, data=payload, headers=headers)
-    print(response.json())
-
+    
     # file.close()
     # os.remove(filepath)
 
     text = response.json()["results"]["channels"][0]['alternatives'][0]["transcript"]
+    print("Transcript:", text)
 
     return text
 
@@ -116,21 +115,18 @@ def upload_file():
 
         # Process the audio file for speech recognition
         speech = generate_transcript(file_path)
-        print(speech)
         if speech:
             # Detect hate speech
             llm = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.0)
             hate_speech_output = llm.invoke(f'Given a Hindi text, check for any hate speech or abus related words in '
                                             f'the text and return True if detected, otherwise return False. Input '
                                             f'text: {speech}')
-            print(hate_speech_output.content)
             return jsonify({'hate_speech': hate_speech_output.content})
     else:
         return jsonify({'error': 'Invalid file type'})
 
-def identify_hate_speech(audio_file):
-    speech = generate_transcript(audio_file)
-    print(speech)
+def identify_hate_speech(audio_bytes):
+    speech = generate_transcript(audio_bytes)
     if speech:
         # Detect hate speech
         llm = ChatOpenAI(model_name='gpt-3.5-turbo', temperature=0.0)
@@ -140,10 +136,10 @@ def identify_hate_speech(audio_file):
         return hate_speech_output.content
 
 
-def identify_screem(audio_file):
-    audio_bytes = audio_file.read()
+def identify_screem(audio_bytes):
     prediction = predict_audio_tflite(audio_bytes)
     return prediction == "Scream"
+
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -159,22 +155,40 @@ def predict():
     return jsonify({"scream_detected": scream_detected})
 
 
+def check_for_keywords(transcript, keywords=["safeguard help", "saveguard help", "safeguard health", "safe cuard health", "Safe"]):
+    # Convert the transcript to lower case for case-insensitive matching
+    transcript_lower = transcript.lower()
+   
+    # Check each keyword against the transcript
+    for keyword in keywords:
+        if keyword.lower() in transcript_lower:
+            print("Keyword Detected")
+            return True  # Return True as soon as any keyword matches
+    print("Keyword NOT Detected")
+    return False  # Return False if no keywords match
+
 @app.route('/threat', methods=['POST'])
 def threat():
     if 'audio' not in request.files:
         return "Audio file is missing", 400
 
     audio_file = request.files['audio']
-    
-    screem = identify_screem(audio_file)
-    hate_speech = identify_hate_speech(audio_file)
+    audio_bytes = audio_file.read()
+    screem = identify_screem(audio_bytes)
+    hate_speech = identify_hate_speech(audio_bytes)
 
+    transcript = generate_transcript(audio_bytes)
+    keywords_detected = check_for_keywords(transcript)
+    print("Scream:",screem, "Hate Speech:", hate_speech)
+
+    
     return jsonify({"scream_detected": screem,
                     "hate_speech": hate_speech,
-                    "thread": screem or hate_speech})
+                    "keywords_detected":keywords_detected,
+                    "threat": screem or hate_speech or keywords_detected})
 
-
-
+    
+    
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=8080)
