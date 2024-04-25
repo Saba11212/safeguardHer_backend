@@ -12,7 +12,7 @@ import soundfile as sf
 import librosa
 from io import BytesIO
 import joblib
-
+from distutils.util import strtobool
  
 load_dotenv()
 
@@ -133,7 +133,8 @@ def identify_hate_speech(audio_bytes):
         hate_speech_output = llm.invoke(f'Given a Hindi text, check for any hate speech or abus related words in '
                                         f'the text and return True if detected, otherwise return False. Input '
                                         f'text: {speech}')
-        return hate_speech_output.content
+        return strtobool(hate_speech_output.content)
+    return False
 
 
 def identify_screem(audio_bytes):
@@ -169,6 +170,7 @@ def check_for_keywords(transcript, keywords=["safeguard help", "saveguard help",
 
 @app.route('/threat', methods=['POST'])
 def threat():
+    print("in threat")
     if 'audio' not in request.files:
         return "Audio file is missing", 400
 
@@ -179,12 +181,13 @@ def threat():
 
     transcript = generate_transcript(audio_bytes)
     keywords_detected = check_for_keywords(transcript)
-    print("Scream:",screem, "Hate Speech:", hate_speech)
+    app.logger.info("Scream:",screem, "Hate Speech:", hate_speech, "keywords_detected", keywords_detected)
+
 
     
     return jsonify({"scream_detected": screem,
                     "hate_speech": hate_speech,
-                    "keywords_detected":keywords_detected,
+                    "keywords_detected": keywords_detected,
                     "threat": screem or hate_speech or keywords_detected})
 
     
